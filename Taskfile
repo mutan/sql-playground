@@ -3,9 +3,84 @@ version: "3"
 dotenv: [".env"]
 
 vars:
-  COMPOSE: docker compose -f docker/docker-compose.yml --env-file .env
+  COMPOSE: docker compose -f docker/docker-compose.yaml --env-file .env
+  PSQL: '{{.COMPOSE}} exec -T db psql -v ON_ERROR_STOP=1 -U ${POSTGRES_USER:-playground} -d ${POSTGRES_DB:-playground}'
 
 tasks:
   default:
     desc: Show available tasks
     cmd: task --list
+
+  # --- Container --------------------------------------------------------------
+
+  up:
+    desc: Start Postgres and wait until it is healthy
+    cmd: "{{.COMPOSE}} up -d --wait"
+
+  down:
+    desc: Stop Postgres (data is kept)
+    cmd: "{{.COMPOSE}} down"
+
+  destroy:
+    desc: Stop Postgres and delete the data volume
+    prompt: This will delete all data in the database. Continue?
+    cmd: "{{.COMPOSE}} down -v"
+
+  logs:
+    desc: Follow Postgres logs
+    cmd: "{{.COMPOSE}} logs -f db"
+
+  ps:
+    desc: Show container status
+    cmd: "{{.COMPOSE}} ps"
+
+  psql:
+    desc: Open an interactive psql session
+    interactive: true
+    cmd: "{{.COMPOSE}} exec db psql -U ${POSTGRES_USER:-playground} -d ${POSTGRES_DB:-playground}"
+
+  # --- Tasks ------------------------------------------------------------------
+
+  list:
+    desc: List available tasks
+    cmd: ls -1 tasks
+
+  reset:
+    desc: Drop everything in the public schema
+    cmd: "{{.PSQL}} -q -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'"
+
+  load:
+    desc: "Load a task's schema and data (task load T=001-profiles)"
+    requires:
+      vars: [T]
+    preconditions:
+      - sh: test -f tasks/{{.T}}/schema.sql
+        msg: "tasks/{{.T}}/schema.sql not found"
+    cmds:
+      - task: reset
+      - "{{.PSQL}} -q -f /tasks/{{.T}}/schema.sql"
+      - if [ -f tasks/{{.T}}/data.sql ]; then {{.PSQL}} -q -f /tasks/{{.T}}/data.sql; fi
+      - echo "Loaded {{.T}}"
+
+  run:
+    desc: "Run a SQL file from a task (task run T=001-profiles [S=solution.sql])"
+    requires:
+      vars: [T]
+    vars:
+      S: '{{.S | default "solution.sql"}}'
+    preconditions:
+      - sh: test -f tasks/{{.T}}/{{.S}}
+        msg: "tasks/{{.T}}/{{.S}} not found"
+    cmd: "{{.PSQL}} -f /tasks/{{.T}}/{{.S}}"
+
+  new:
+    desc: "Create a new task folder (task new T=002-something)"
+    requires:
+      vars: [T]
+    preconditions:
+      - sh: test ! -e tasks/{{.T}}
+        msg: "tasks/{{.T}} already exists"
+    cmds:
+      - mkdir -p tasks/{{.T}}
+      - touch tasks/{{.T}}/task.md tasks/{{.T}}/schema.sql tasks/{{.T}}/data.sql tasks/{{.T}}/solution.sql
+      - echo "Created tasks/{{.T}}"
