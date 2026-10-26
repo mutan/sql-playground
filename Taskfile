@@ -1,0 +1,11 @@
+version: "3"
+
+dotenv: [".env"]
+
+vars:
+  COMPOSE: docker compose -f docker/docker-compose.yml --env-file .env
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmd: task --list
